@@ -13,11 +13,10 @@ cudnn.benchmark = True
 
 
 def main(
-        data_folder, 
-        keep_difficult,
-        lp, # learning_parameters
-        device,
-    ):
+    data_folder, 
+    lp, # learning_parameters
+    device,
+):
     """
     Training.
     """
@@ -55,8 +54,7 @@ def main(
 
     # Custom dataloaders
     train_dataset = PascalVOCDataset(data_folder,
-                                     split='train',
-                                     keep_difficult=keep_difficult)
+                                     split='train')
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=lp['batch_size'], shuffle=True,
                                                collate_fn=train_dataset.collate_fn, num_workers=lp['workers'],
                                                pin_memory=True)  # note that we're passing the collate function here
@@ -108,7 +106,7 @@ def train(lp, train_loader, model, criterion, optimizer, epoch, device):
     start = time.time()
 
     # Batches
-    for i, (images, boxes, labels, _) in enumerate(train_loader):
+    for i, (images, boxes, labels) in enumerate(train_loader):
         data_time.update(time.time() - start)
 
         # Move to default device
@@ -154,7 +152,6 @@ if __name__ == '__main__':
 
     # Data parameters
     data_folder = 'trial_dataset_dumps'  # folder with data files
-    keep_difficult = True  # use objects considered difficult to detect?
 
     learning_parameters = {
         'batch_size': 8,  # batch size
@@ -171,7 +168,6 @@ if __name__ == '__main__':
 
     main(
         data_folder, 
-        keep_difficult,
         learning_parameters,
         device,
     )

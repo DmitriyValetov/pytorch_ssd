@@ -25,11 +25,10 @@ def evaluate(test_loader, model,label_map,rev_label_map, device):
     det_scores = list()
     true_boxes = list()
     true_labels = list()
-    true_difficulties = list()  # it is necessary to know which objects are 'difficult', see 'calculate_mAP' in utils.py
 
     with torch.no_grad():
         # Batches
-        for i, (images, boxes, labels, difficulties) in enumerate(tqdm(test_loader, desc='Evaluating')):
+        for i, (images, boxes, labels) in enumerate(tqdm(test_loader, desc='Evaluating')):
             images = images.to(device)  # (N, 3, 300, 300)
 
             # Forward prop.
@@ -44,23 +43,21 @@ def evaluate(test_loader, model,label_map,rev_label_map, device):
             # Store this batch's results for mAP calculation
             boxes = [b.to(device) for b in boxes]
             labels = [l.to(device) for l in labels]
-            difficulties = [d.to(device) for d in difficulties]
 
             det_boxes.extend(det_boxes_batch)
             det_labels.extend(det_labels_batch)
             det_scores.extend(det_scores_batch)
             true_boxes.extend(boxes)
             true_labels.extend(labels)
-            true_difficulties.extend(difficulties)
 
 
-        APs, mAP = calculate_mAP(det_boxes, det_labels, det_scores, true_boxes, true_labels, true_difficulties, label_map, rev_label_map, device=device)
+        APs, mAP = calculate_mAP(det_boxes, det_labels, det_scores, true_boxes, true_labels, label_map, rev_label_map, device=device)
         # Print AP for each class
         pp.pprint(APs)
         print('\nMean Average Precision (mAP): %.3f' % mAP)
 
         # Calculate mAP
-        APs, mAP = calculate_mmAP(det_boxes, det_labels, det_scores, true_boxes, true_labels, true_difficulties, label_map, rev_label_map, device=device)
+        APs, mAP = calculate_mmAP(det_boxes, det_labels, det_scores, true_boxes, true_labels, label_map, rev_label_map, device=device)
         # Print AP for each class
         pp.pprint(APs)
         print('\nMean Average Precision (mAP): %.3f' % mAP)
@@ -74,8 +71,6 @@ if __name__ == '__main__':
 
     # Data parameters
     data_folder = 'trial_dataset_dumps'  # folder with data files
-
-    keep_difficult = True  # use objects considered difficult to detect?
 
     learning_parameters = {
         'batch_size': 8,  # batch size
@@ -93,8 +88,7 @@ if __name__ == '__main__':
     label_map, rev_label_map, label_color_map = load_maps(os.path.join(data_folder, 'label_map.json'))
     
     test_dataset = PascalVOCDataset(data_folder,
-                                    split='test',
-                                    keep_difficult=keep_difficult)
+                                    split='test')
     test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=learning_parameters['batch_size'], shuffle=False,
                                             collate_fn=test_dataset.collate_fn, num_workers=learning_parameters['workers'], pin_memory=True)
 

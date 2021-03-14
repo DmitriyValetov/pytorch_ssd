@@ -54,10 +54,8 @@ def parse_annotation(annotation_path, label_map=pascal_voc_label_map):
 
     boxes = list()
     labels = list()
-    difficulties = list()
     for object in root.iter('object'):
 
-        difficult = int(object.find('difficult').text == '1')
 
         label = object.find('name').text.lower().strip()
         if label not in label_map:
@@ -71,9 +69,8 @@ def parse_annotation(annotation_path, label_map=pascal_voc_label_map):
 
         boxes.append([xmin, ymin, xmax, ymax])
         labels.append(label_map[label])
-        difficulties.append(difficult)
 
-    return {'boxes': boxes, 'labels': labels, 'difficulties': difficulties}
+    return {'boxes': boxes, 'labels': labels}
 
 
 def create_jsons_for_roboflow_pascal_voc(roboflow_path, output_folder):
@@ -243,7 +240,7 @@ def decimate(tensor, m):
     return tensor
 
 
-def calculate_mmAP(det_boxes, det_labels, det_scores, true_boxes, true_labels, true_difficulties, label_map=pascal_voc_label_map, rev_label_map=rev_pascal_voc_label_map, device='cpu'):
+def calculate_mmAP(det_boxes, det_labels, det_scores, true_boxes, true_labels, label_map=pascal_voc_label_map, rev_label_map=rev_pascal_voc_label_map, device='cpu'):
     APs = []
     mAPs = []
     for iou_min in np.linspace(0.5, 0.85, 11):
@@ -253,7 +250,6 @@ def calculate_mmAP(det_boxes, det_labels, det_scores, true_boxes, true_labels, t
             det_scores, 
             true_boxes, 
             true_labels, 
-            true_difficulties, 
             label_map, 
             rev_label_map, 
             iou_min,
@@ -266,7 +262,7 @@ def calculate_mmAP(det_boxes, det_labels, det_scores, true_boxes, true_labels, t
     return APs, np.mean(mAPs)
 
 
-def calculate_mAP(det_boxes, det_labels, det_scores, true_boxes, true_labels, true_difficulties, label_map=pascal_voc_label_map, rev_label_map=rev_pascal_voc_label_map, iou_min=0.5, device='cpu'):
+def calculate_mAP(det_boxes, det_labels, det_scores, true_boxes, true_labels, label_map=pascal_voc_label_map, rev_label_map=rev_pascal_voc_label_map, iou_min=0.5, device='cpu'):
     """
     Calculate the Mean Average Precision (mAP) of detected objects.
 
@@ -277,12 +273,9 @@ def calculate_mAP(det_boxes, det_labels, det_scores, true_boxes, true_labels, tr
     :param det_scores: list of tensors, one tensor for each image containing detected objects' labels' scores
     :param true_boxes: list of tensors, one tensor for each image containing actual objects' bounding boxes
     :param true_labels: list of tensors, one tensor for each image containing actual objects' labels
-    :param true_difficulties: list of tensors, one tensor for each image containing actual objects' difficulty (0 or 1)
     :return: list of average precisions for all classes, mean average precision (mAP)
     """
-    assert len(det_boxes) == len(det_labels) == len(det_scores) == len(true_boxes) == len(
-        true_labels) == len(
-        true_difficulties)  # these are all lists of tensors of the same length, i.e. number of images
+    assert len(det_boxes) == len(det_labels) == len(det_scores) == len(true_boxes) == len(true_labels)  # these are all lists of tensors of the same length, i.e. number of images
     n_classes = len(label_map)
 
     # Store all (true) objects in a single continuous tensor while keeping track of the image it is from
@@ -293,7 +286,6 @@ def calculate_mAP(det_boxes, det_labels, det_scores, true_boxes, true_labels, tr
         device)  # (n_objects), n_objects is the total no. of objects across all images
     true_boxes = torch.cat(true_boxes, dim=0)  # (n_objects, 4)
     true_labels = torch.cat(true_labels, dim=0)  # (n_objects)
-    true_difficulties = torch.cat(true_difficulties, dim=0)  # (n_objects)
 
     assert true_images.size(0) == true_boxes.size(0) == true_labels.size(0)
 
@@ -314,12 +306,11 @@ def calculate_mAP(det_boxes, det_labels, det_scores, true_boxes, true_labels, tr
         # Extract only objects with this class
         true_class_images = true_images[true_labels == c]  # (n_class_objects)
         true_class_boxes = true_boxes[true_labels == c]  # (n_class_objects, 4)
-        true_class_difficulties = true_difficulties[true_labels == c]  # (n_class_objects)
-        n_easy_class_objects = (1 - true_class_difficulties).sum().item()  # ignore difficult objects
+        n_easy_class_objects = (true_labels == c).sum().item()  # ignore difficult objects
 
         # Keep track of which true objects with this class have already been 'detected'
         # So far, none
-        true_class_boxes_detected = torch.zeros((true_class_difficulties.size(0)), dtype=torch.uint8).to(
+        true_class_boxes_detected = torch.zeros((true_class_boxes.size(0)), dtype=torch.uint8).to(
             device)  # (n_class_objects)
 
         # Extract only detections with this class
@@ -342,9 +333,8 @@ def calculate_mAP(det_boxes, det_labels, det_scores, true_boxes, true_labels, tr
             this_detection_box = det_class_boxes[d].unsqueeze(0)  # (1, 4)
             this_image = det_class_images[d]  # (), scalar
 
-            # Find objects in the same image with this class, their difficulties, and whether they have been detected before
+            # Find objects in the same image with this class, and whether they have been detected before
             object_boxes = true_class_boxes[true_class_images == this_image]  # (n_class_objects_in_img)
-            object_difficulties = true_class_difficulties[true_class_images == this_image]  # (n_class_objects_in_img)
             # If no such object in this image, then the detection is a false positive
             if object_boxes.size(0) == 0:
                 false_positives[d] = 1
@@ -354,22 +344,20 @@ def calculate_mAP(det_boxes, det_labels, det_scores, true_boxes, true_labels, tr
             overlaps = find_jaccard_overlap(this_detection_box, object_boxes)  # (1, n_class_objects_in_img)
             max_overlap, ind = torch.max(overlaps.squeeze(0), dim=0)  # (), () - scalars
 
-            # 'ind' is the index of the object in these image-level tensors 'object_boxes', 'object_difficulties'
+            # 'ind' is the index of the object in these image-level tensors 'object_boxes'
             # In the original class-level tensors 'true_class_boxes', etc., 'ind' corresponds to object with index...
             original_ind = torch.LongTensor(range(true_class_boxes.size(0)))[true_class_images == this_image][ind]
             # We need 'original_ind' to update 'true_class_boxes_detected'
 
             # If the maximum overlap is greater than the threshold of 0.5, it's a match
             if max_overlap.item() > iou_min:
-                # If the object it matched with is 'difficult', ignore it
-                if object_difficulties[ind] == 0:
-                    # If this object has already not been detected, it's a true positive
-                    if true_class_boxes_detected[original_ind] == 0:
-                        true_positives[d] = 1
-                        true_class_boxes_detected[original_ind] = 1  # this object has now been detected/accounted for
-                    # Otherwise, it's a false positive (since this object is already accounted for)
-                    else:
-                        false_positives[d] = 1
+                # If this object has already not been detected, it's a true positive
+                if true_class_boxes_detected[original_ind] == 0:
+                    true_positives[d] = 1
+                    true_class_boxes_detected[original_ind] = 1  # this object has now been detected/accounted for
+                # Otherwise, it's a false positive (since this object is already accounted for)
+                else:
+                    false_positives[d] = 1
             # Otherwise, the detection occurs in a different location than the actual object, and is a false positive
             else:
                 false_positives[d] = 1
@@ -542,7 +530,7 @@ def expand(image, boxes, filler):
     return new_image, new_boxes
 
 
-def random_crop(image, boxes, labels, difficulties):
+def random_crop(image, boxes, labels):
     """
     Performs a random crop in the manner stated in the paper. Helps to learn to detect larger and partial objects.
 
@@ -553,8 +541,7 @@ def random_crop(image, boxes, labels, difficulties):
     :param image: image, a tensor of dimensions (3, original_h, original_w)
     :param boxes: bounding boxes in boundary coordinates, a tensor of dimensions (n_objects, 4)
     :param labels: labels of objects, a tensor of dimensions (n_objects)
-    :param difficulties: difficulties of detection of these objects, a tensor of dimensions (n_objects)
-    :return: cropped image, updated bounding box coordinates, updated labels, updated difficulties
+    :return: cropped image, updated bounding box coordinates, updated labels
     """
     original_h = image.size(1)
     original_w = image.size(2)
@@ -565,7 +552,7 @@ def random_crop(image, boxes, labels, difficulties):
 
         # If not cropping
         if min_overlap is None:
-            return image, boxes, labels, difficulties
+            return image, boxes, labels
 
         # Try up to 50 times for this choice of minimum overlap
         # This isn't mentioned in the paper, of course, but 50 is chosen in paper authors' original Caffe repo
@@ -617,7 +604,6 @@ def random_crop(image, boxes, labels, difficulties):
             # Discard bounding boxes that don't meet this criterion
             new_boxes = boxes[centers_in_crop, :]
             new_labels = labels[centers_in_crop]
-            new_difficulties = difficulties[centers_in_crop]
 
             # Calculate bounding boxes' new coordinates in the crop
             new_boxes[:, :2] = torch.max(new_boxes[:, :2], crop[:2])  # crop[:2] is [left, top]
@@ -625,7 +611,7 @@ def random_crop(image, boxes, labels, difficulties):
             new_boxes[:, 2:] = torch.min(new_boxes[:, 2:], crop[2:])  # crop[2:] is [right, bottom]
             new_boxes[:, 2:] -= crop[:2]
 
-            return new_image, new_boxes, new_labels, new_difficulties
+            return new_image, new_boxes, new_labels
 
 
 def flip(image, boxes):
@@ -704,16 +690,15 @@ def photometric_distort(image):
     return new_image
 
 
-def transform(image, boxes, labels, difficulties, split):
+def transform(image, boxes, labels, split):
     """
     Apply the transformations above.
 
     :param image: image, a PIL Image
     :param boxes: bounding boxes in boundary coordinates, a tensor of dimensions (n_objects, 4)
     :param labels: labels of objects, a tensor of dimensions (n_objects)
-    :param difficulties: difficulties of detection of these objects, a tensor of dimensions (n_objects)
     :param split: one of 'TRAIN' or 'TEST', since different sets of transformations are applied
-    :return: transformed image, transformed bounding box coordinates, transformed labels, transformed difficulties
+    :return: transformed image, transformed bounding box coordinates, transformed labels
     """
     assert split in {'TRAIN', 'TEST'}
 
@@ -725,7 +710,6 @@ def transform(image, boxes, labels, difficulties, split):
     new_image = image
     new_boxes = boxes
     new_labels = labels
-    new_difficulties = difficulties
     # Skip the following operations for evaluation/testing
     if split == 'TRAIN':
         # A series of photometric distortions in random order, each with 50% chance of occurrence, as in Caffe repo
@@ -740,8 +724,7 @@ def transform(image, boxes, labels, difficulties, split):
             new_image, new_boxes = expand(new_image, boxes, filler=mean)
 
         # Randomly crop image (zoom in)
-        new_image, new_boxes, new_labels, new_difficulties = random_crop(new_image, new_boxes, new_labels,
-                                                                         new_difficulties)
+        new_image, new_boxes, new_labels = random_crop(new_image, new_boxes, new_labels)
 
         # Convert Torch tensor to PIL image
         new_image = FT.to_pil_image(new_image)
@@ -759,7 +742,7 @@ def transform(image, boxes, labels, difficulties, split):
     # Normalize by mean and standard deviation of ImageNet data that our base VGG was trained on
     new_image = FT.normalize(new_image, mean=mean, std=std)
 
-    return new_image, new_boxes, new_labels, new_difficulties
+    return new_image, new_boxes, new_labels
 
 
 def adjust_learning_rate(optimizer, scale):
