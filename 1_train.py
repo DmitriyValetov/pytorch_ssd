@@ -7,6 +7,7 @@ import torch.utils.data
 from ssd import SSD300
 from loss import MultiBoxLoss
 from datasets.datasets import PascalVOCDataset
+from utils import train_transformer, valid_transformer
 from utils import adjust_learning_rate, save_checkpoint, AverageMeter, clip_gradient, load_maps
 
 cudnn.benchmark = True
@@ -54,7 +55,8 @@ def main(
 
     # Custom dataloaders
     train_dataset = PascalVOCDataset(data_folder,
-                                     split='train')
+                                     split='train',
+                                     transformer=train_transformer)
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=lp['batch_size'], shuffle=True,
                                                collate_fn=train_dataset.collate_fn, num_workers=lp['workers'],
                                                pin_memory=True)  # note that we're passing the collate function here

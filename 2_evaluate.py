@@ -88,7 +88,8 @@ if __name__ == '__main__':
     label_map, rev_label_map, label_color_map = load_maps(os.path.join(data_folder, 'label_map.json'))
     
     test_dataset = PascalVOCDataset(data_folder,
-                                    split='test')
+                                    split='test',
+                                    transformer=valid_transformer)
     test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=learning_parameters['batch_size'], shuffle=False,
                                             collate_fn=test_dataset.collate_fn, num_workers=learning_parameters['workers'], pin_memory=True)
 

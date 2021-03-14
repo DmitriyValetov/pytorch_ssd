@@ -11,12 +11,13 @@ class PascalVOCDataset(Dataset):
     A PyTorch Dataset class to be used in a PyTorch DataLoader to create batches.
     """
 
-    def __init__(self, data_folder, split):
+    def __init__(self, data_folder, split, transformer=None):
         """
         :param data_folder: folder where data files are stored
         :param split: split, one of 'TRAIN' or 'TEST'
         """
         self.split = split.upper()
+        self.transformer = transformer
 
         assert self.split in {'TRAIN', 'TEST'}
 
@@ -41,7 +42,9 @@ class PascalVOCDataset(Dataset):
         labels = torch.LongTensor(objects['labels'])  # (n_objects)
 
         # Apply transformations
-        image, boxes, labels = transform(image, boxes, labels, split=self.split)
+        # image, boxes, labels = transform(image, boxes, labels, split=self.split)
+        if self.transformer:
+            image, boxes, labels = self.transformer(image, boxes, labels)
 
         return image, boxes, labels
 
